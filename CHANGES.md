@@ -1,6 +1,26 @@
 Change Log
 ==========
 
+### TODO
+
+* Added support for [3D Tiles](https://github.com/AnalyticalGraphicsInc/3d-tiles/blob/master/README.md) for streaming massive heterogeneous 3D geospatial datasets.  The new Cesium APIs are:
+   * `Cesium3DTileset`
+   * `Cesium3DTileStyle`, `StyleExpression`, `Expression`, and `ConditionsExpression`
+   * `Cesium3DTile`
+   * `Cesium3DTileContent`
+   * `Cesium3DTileFeature`
+
+### 1.25 - 2016-09-01
+
+* Deprecated
+    * Deprecated `castShadows` and `receiveShadows` properties from `Model`, `Primitive`, and `Globe`. They will be removed in 1.26. Use `shadows` instead with the `ShadowMode` enum, e.g. `model.shadows = ShadowMode.ENABLED`.
+    * `Viewer.terrainShadows` now uses the `ShadowMode` enum instead of a Boolean, e.g. `viewer.terrainShadows = ShadowMode.RECEIVE_ONLY`. Boolean support will be dropped in 1.26.
+* Updated the online [model converter](http://cesiumjs.org/convertmodel.html) to convert OBJ models to glTF with [obj2gltf](https://github.com/AnalyticalGraphicsInc/OBJ2GLTF), as well as optimize existing glTF models with the [gltf-pipeline](https://github.com/AnalyticalGraphicsInc/gltf-pipeline).  Also added an option to compress geometry using the glTF [WEB3D_quantized_attributes](https://github.com/KhronosGroup/glTF/blob/master/extensions/Vendor/WEB3D_quantized_attributes/README.md) extension.
+* Added `shadows` property to the entity API for `Box`, `Corridor`, `Cylinder`, `Ellipse`, `Ellipsoid`, `Polygon`, `Polyline`, `PoylineVolume`, `Rectangle`, and `Wall`. [#4005](https://github.com/AnalyticalGraphicsInc/cesium/pull/4005)
+* Fixed an issue causing error if KML has a clamped to ground LineString with color. [#4131](https://github.com/AnalyticalGraphicsInc/cesium/issues/4131)
+* Camera flights now disable collision with the terrain until all of the terrain in the area has finished loading. This prevents the camera from being moved to be above lower resolution terrain when flying to a position close to higher resolution terrain. [#4075](https://github.com/AnalyticalGraphicsInc/cesium/issues/4075)
+* Added support for Int32 and Uint32 in ComponentDatatypeSpec.
+
 ### 1.24 - 2016-08-01
 
 * Added support in CZML for expressing `BillboardGraphics.alignedAxis` as the velocity vector of an entity, using `velocityReference` syntax.
