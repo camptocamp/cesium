@@ -18,8 +18,8 @@ defineSuite([
         'Core/loadArrayBuffer',
         'Core/loadJson',
         'Core/Math',
-        'Core/Matrix4',
         'Core/Matrix3',
+        'Core/Matrix4',
         'Core/PrimitiveType',
         'Core/Transforms',
         'Renderer/RenderState',
@@ -49,8 +49,8 @@ defineSuite([
         loadArrayBuffer,
         loadJson,
         CesiumMath,
-        Matrix4,
         Matrix3,
+        Matrix4,
         PrimitiveType,
         Transforms,
         RenderState,
@@ -232,6 +232,16 @@ defineSuite([
        expect(texturedBoxModel.debugWireframe).toEqual(false);
     });
 
+    it('preserves query string in url', function() {
+        var params = '?param1=1&param2=2';
+        var url = texturedBoxUrl + params;
+        var model = Model.fromGltf({
+            url: url
+        });
+        expect(model._basePath).toEndWith(params);
+        expect(model._baseUri).toEndWith(params);
+    });
+
     it('renders', function() {
         verifyRender(texturedBoxModel);
     });
@@ -257,6 +267,24 @@ defineSuite([
     it('resolves readyPromise', function() {
         return texturedBoxModel.readyPromise.then(function(model) {
             verifyRender(model);
+        });
+    });
+
+    it('rejects readyPromise on error', function() {
+        var invalidGltf = clone(texturedBoxModel.gltf, true);
+        invalidGltf.shaders.CesiumTexturedBoxTest0FS.uri = 'invalid.glsl';
+
+        var model = primitives.add(new Model({
+            gltf : invalidGltf
+        }));
+
+        scene.renderForSpecs();
+
+        return model.readyPromise.then(function(model) {
+            fail('should not resolve');
+        }).otherwise(function(error) {
+            expect(model.ready).toEqual(false);
+            primitives.remove(model);
         });
     });
 
@@ -1834,7 +1862,15 @@ defineSuite([
                 getHeight : function() {
                     return 0.0;
                 },
-                _surface : {},
+                _surface : {
+                    tileProvider : {
+                        ready : true
+                    },
+                    _tileLoadQueue : {},
+                    _debug : {
+                        tilesWaitingForChildren : 0
+                    }
+                },
                 destroy : function() {}
             };
 

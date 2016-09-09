@@ -219,7 +219,7 @@ var viewModel = {
     size : 1024,
     modelOptions : ['Wood Tower', 'Cesium Air', 'Cesium Man', 'Transparent Box', 'Shadow Tester', 'Shadow Tester 2', 'Shadow Tester 3', 'Shadow Tester 4', 'Shadow Tester Point'],
     model : 'Shadow Tester',
-    locationOptions : ['Exton', 'Everest', 'Pinnacle PA', 'Seneca Rocks', 'Half Dome'],
+    locationOptions : ['Exton', 'Everest', 'Pinnacle PA', 'Seneca Rocks', 'Half Dome', '3D Tiles'],
     location : 'Pinnacle PA',
     modelPositionOptions : ['Center', 'Ground', 'High', 'Higher', 'Space'],
     modelPosition : 'Center',
@@ -302,6 +302,11 @@ var uiOptions = {
         'Half Dome' : {
             'centerLongitude' : -2.0862479628,
             'centerLatitude' : 0.6587902522
+        },
+        '3D Tiles' : {
+            'centerLongitude' : -1.31968,
+            'centerLatitude' : 0.698874,
+            'tileset' : '../../../Specs/Data/Cesium3DTiles/Tilesets/Tileset'
         }
     }
 };
@@ -390,8 +395,7 @@ function updateSettings() {
     // Force all derived commands to update
     shadowMap.dirty = true;
 
-    globe.castShadows = viewModel.terrainCast;
-    globe.receiveShadows = viewModel.terrainReceive;
+    globe.shadows = Cesium.ShadowMode.fromCastReceive(viewModel.terrainCast, viewModel.terrainReceive);
     globe.show = viewModel.globe;
     scene.skyAtmosphere.show = viewModel.globe;
 }
@@ -570,6 +574,10 @@ function updateModels() {
     createBoxRTC(position2);
     createSphere(position1);
 
+    if (Cesium.defined(location.tileset)) {
+        createTileset(location.tileset);
+    }
+
     // Add a grid of models
     if (viewModel.grid) {
         var spacing = 0.00002;
@@ -583,6 +591,12 @@ function updateModels() {
             createModel(uiOptions.modelUrls[viewModel.model], position);
         }
     }
+}
+
+function createTileset(url) {
+    scene.primitives.add(new Cesium.Cesium3DTileset({
+        url : url
+    }));
 }
 
 function createModel(url, origin) {
@@ -639,8 +653,7 @@ function createBoxRTC(origin) {
         }),
         asynchronous : false,
         rtcCenter : boxGeometry.boundingSphere.center,
-        castShadows : true,
-        receiveShadows : true
+        shadows : Cesium.ShadowMode.ENABLED
     });
 
     scene.primitives.add(box);
@@ -665,8 +678,7 @@ function createBox(origin) {
             closed : true
         }),
         asynchronous : false,
-        castShadows : true,
-        receiveShadows : true
+        shadows : Cesium.ShadowMode.ENABLED
     });
 
     scene.primitives.add(box);
@@ -691,8 +703,7 @@ function createSphere(origin) {
             closed : true
         }),
         asynchronous : false,
-        castShadows : true,
-        receiveShadows : true
+        shadows : Cesium.ShadowMode.ENABLED
     });
 
     scene.primitives.add(sphere);
@@ -711,7 +722,9 @@ var handler = new Cesium.ScreenSpaceEventHandler(canvas);
 handler.setInputAction(function(movement) {
     var picked = scene.pick(movement.position);
     if (Cesium.defined(picked) && Cesium.defined(picked.primitive)) {
-        picked.primitive.castShadows = !picked.primitive.castShadows;
+        var castShadows = Cesium.ShadowMode.castShadows(picked.primitive.shadows);
+        var receiveShadows = Cesium.ShadowMode.receiveShadows(picked.primitive.shadows);
+        picked.primitive.shadows = Cesium.ShadowMode.fromCastReceive(!castShadows, receiveShadows);
     }
 }, Cesium.ScreenSpaceEventType.LEFT_DOUBLE_CLICK);
 
@@ -719,7 +732,9 @@ handler.setInputAction(function(movement) {
 handler.setInputAction(function(movement) {
     var picked = scene.pick(movement.position);
     if (Cesium.defined(picked)) {
-        picked.primitive.receiveShadows = !picked.primitive.receiveShadows;
+        var castShadows = Cesium.ShadowMode.castShadows(picked.primitive.shadows);
+        var receiveShadows = Cesium.ShadowMode.receiveShadows(picked.primitive.shadows);
+        picked.primitive.shadows = Cesium.ShadowMode.fromCastReceive(castShadows, !receiveShadows);
     }
 }, Cesium.ScreenSpaceEventType.MIDDLE_DOUBLE_CLICK);
 

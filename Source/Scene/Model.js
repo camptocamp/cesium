@@ -11,6 +11,7 @@ define([
         '../Core/defaultValue',
         '../Core/defined',
         '../Core/defineProperties',
+        '../Core/deprecationWarning',
         '../Core/destroyObject',
         '../Core/DeveloperError',
         '../Core/FeatureDetection',
@@ -19,6 +20,7 @@ define([
         '../Core/getMagic',
         '../Core/getStringFromTypedArray',
         '../Core/IndexDatatype',
+        '../Core/joinUrls',
         '../Core/loadArrayBuffer',
         '../Core/loadImage',
         '../Core/loadImageFromTypedArray',
@@ -30,6 +32,8 @@ define([
         '../Core/PrimitiveType',
         '../Core/Quaternion',
         '../Core/Queue',
+        '../Core/Request',
+        '../Core/RequestScheduler',
         '../Core/RuntimeError',
         '../Core/Transforms',
         '../Renderer/Buffer',
@@ -49,6 +53,7 @@ define([
         '../ThirdParty/when',
         './getModelAccessor',
         './HeightReference',
+        './JobType',
         './ModelAnimationCache',
         './ModelAnimationCollection',
         './ModelMaterial',
@@ -56,7 +61,8 @@ define([
         './ModelMesh',
         './ModelNode',
         './Pass',
-        './SceneMode'
+        './SceneMode',
+        './ShadowMode'
     ], function(
         BoundingSphere,
         Cartesian2,
@@ -69,6 +75,7 @@ define([
         defaultValue,
         defined,
         defineProperties,
+        deprecationWarning,
         destroyObject,
         DeveloperError,
         FeatureDetection,
@@ -77,6 +84,7 @@ define([
         getMagic,
         getStringFromTypedArray,
         IndexDatatype,
+        joinUrls,
         loadArrayBuffer,
         loadImage,
         loadImageFromTypedArray,
@@ -88,6 +96,8 @@ define([
         PrimitiveType,
         Quaternion,
         Queue,
+        Request,
+        RequestScheduler,
         RuntimeError,
         Transforms,
         Buffer,
@@ -107,6 +117,7 @@ define([
         when,
         getModelAccessor,
         HeightReference,
+        JobType,
         ModelAnimationCache,
         ModelAnimationCollection,
         ModelMaterial,
@@ -114,7 +125,8 @@ define([
         ModelMesh,
         ModelNode,
         Pass,
-        SceneMode) {
+        SceneMode,
+        ShadowMode) {
     'use strict';
 
     // Bail out if the browser doesn't support typed arrays, to prevent the setup function
@@ -137,7 +149,8 @@ define([
     var defaultModelAccept = 'model/vnd.gltf.binary,model/vnd.gltf+json,model/gltf.binary,model/gltf+json;q=0.8,application/json;q=0.2,*/*;q=0.01';
 
     function LoadResources() {
-        this.buffersToCreate = new Queue();
+        this.vertexBuffersToCreate = new Queue();
+        this.indexBuffersToCreate = new Queue();
         this.buffers = {};
         this.pendingBufferLoads = 0;
 
@@ -171,7 +184,9 @@ define([
     };
 
     LoadResources.prototype.finishedBuffersCreation = function() {
-        return ((this.pendingBufferLoads === 0) && (this.buffersToCreate.length === 0));
+        return ((this.pendingBufferLoads === 0) &&
+                (this.vertexBuffersToCreate.length === 0) &&
+                (this.indexBuffersToCreate.length === 0));
     };
 
     LoadResources.prototype.finishedProgramCreation = function() {
@@ -192,7 +207,8 @@ define([
             (this.pendingBufferLoads === 0) &&
             (this.pendingShaderLoads === 0);
         var finishedResourceCreation =
-            (this.buffersToCreate.length === 0) &&
+            (this.vertexBuffersToCreate.length === 0) &&
+            (this.indexBuffersToCreate.length === 0) &&
             (this.programsToCreate.length === 0) &&
             (this.pendingBufferViewToImage === 0);
 
@@ -311,8 +327,9 @@ define([
      * @param {Boolean} [options.allowPicking=true] When <code>true</code>, each glTF mesh and primitive is pickable with {@link Scene#pick}.
      * @param {Boolean} [options.incrementallyLoadTextures=true] Determine if textures may continue to stream in after the model is loaded.
      * @param {Boolean} [options.asynchronous=true] Determines if model WebGL resource creation will be spread out over several frames or block until completion once all glTF files are loaded.
-     * @param {Boolean} [options.castShadows=true] Determines whether the model casts shadows from each light source.
-     * @param {Boolean} [options.receiveShadows=true] Determines whether the model receives shadows from shadow casters in the scene.
+     * @param {Boolean} [options.castShadows=true] Deprecated, use options.shadows instead. Determines whether the model casts shadows from each light source.
+     * @param {Boolean} [options.receiveShadows=true] Deprecated, use options.shadows instead. Determines whether the model receives shadows from shadow casters in the scene.
+     * @param {ShadowMode} [options.shadows=ShadowMode.ENABLED] Determines whether the model casts or receives shadows from each light source.
      * @param {Boolean} [options.debugShowBoundingVolume=false] For debugging only. Draws the bounding sphere for each draw command in the model.
      * @param {Boolean} [options.debugWireframe=false] For debugging only. Draws the model in wireframe.
      * @param {HeightReference} [options.heightReference] Determines how the model is drawn relative to terrain.
@@ -380,10 +397,8 @@ define([
         setCachedGltf(this, cachedGltf);
 
         this._basePath = defaultValue(options.basePath, '');
-
-        var docUri = new Uri(document.location.href);
-        var modelUri = new Uri(this._basePath);
-        this._baseUri = modelUri.resolve(docUri);
+        var baseUri = getBaseUri(document.location.href);
+        this._baseUri = joinUrls(baseUri, this._basePath);
 
         /**
          * Determines if the model primitive will be shown.
@@ -502,25 +517,19 @@ define([
         this._incrementallyLoadTextures = defaultValue(options.incrementallyLoadTextures, true);
         this._asynchronous = defaultValue(options.asynchronous, true);
 
-        /**
-         * Determines whether the model casts shadows from each light source.
-         *
-         * @type {Boolean}
-         *
-         * @default true
-         */
-        this.castShadows = defaultValue(options.castShadows, true);
-        this._castShadows = this.castShadows;
+        // Deprecated options
+        var castShadows = defaultValue(options.castShadows, true);
+        var receiveShadows = defaultValue(options.receiveShadows, true);
 
         /**
-         * Determines whether the model receives shadows from shadow casters in the scene.
+         * Determines whether the model casts or receives shadows from each light source.
          *
-         * @type {Boolean}
+         * @type {ShadowMode}
          *
-         * @default true
+         * @default ShadowMode.ENABLED
          */
-        this.receiveShadows = defaultValue(options.receiveShadows, true);
-        this._receiveShadows = this.receiveShadows;
+        this.shadows = defaultValue(options.shadows, ShadowMode.fromCastReceive(castShadows, receiveShadows));
+        this._shadows = this.shadows;
 
         /**
          * This property is for debugging only; it is not for production use nor is it optimized.
@@ -558,6 +567,7 @@ define([
         this._pickFragmentShaderLoaded = options.pickFragmentShaderLoaded;
         this._pickUniformMapLoaded = options.pickUniformMapLoaded;
         this._ignoreCommands = defaultValue(options.ignoreCommands, false);
+        this._requestType = options.requestType;
 
         /**
          * @private
@@ -600,7 +610,6 @@ define([
             programs : {},
             pickPrograms : {},
             textures : {},
-
             samplers : {},
             renderStates : {}
         };
@@ -868,6 +877,50 @@ define([
             get : function() {
                 return this._dirty;
             }
+        },
+
+        /**
+         * Determines whether the model casts shadows from each light source.
+         *
+         * @memberof Model.prototype
+         *
+         * @type {Boolean}
+         *
+         * @deprecated
+         */
+        castShadows : {
+            get : function() {
+                deprecationWarning('Model.castShadows', 'Model.castShadows was deprecated in Cesium 1.25. It will be removed in 1.26. Use Model.shadows instead.');
+                return ShadowMode.castShadows(this.shadows);
+            },
+            set : function(value) {
+                deprecationWarning('Model.castShadows', 'Model.castShadows was deprecated in Cesium 1.25. It will be removed in 1.26. Use Model.shadows instead.');
+                var castShadows = value;
+                var receiveShadows = ShadowMode.receiveShadows(this.shadows);
+                this.shadows = ShadowMode.fromCastReceive(castShadows, receiveShadows);
+            }
+        },
+
+        /**
+         * Determines whether the model receives shadows from shadow casters in the scene.
+         *
+         * @memberof Model.prototype
+         *
+         * @type {Boolean}
+         *
+         * @deprecated
+         */
+        receiveShadows : {
+            get : function() {
+                deprecationWarning('Model.receiveShadows', 'Model.receiveShadows was deprecated in Cesium 1.25. It will be removed in 1.26. Use Model.shadows instead.');
+                return ShadowMode.receiveShadows(this.shadows);
+            },
+            set : function(value) {
+                deprecationWarning('Model.receiveShadows', 'Model.receiveShadows was deprecated in Cesium 1.25. It will be removed in 1.26. Use Model.shadows instead.');
+                var castShadows = ShadowMode.castShadows(this.shadows);
+                var receiveShadows = value;
+                this.shadows = ShadowMode.fromCastReceive(castShadows, receiveShadows);
+            }
         }
     });
 
@@ -946,8 +999,7 @@ define([
      * @param {Boolean} [options.allowPicking=true] When <code>true</code>, each glTF mesh and primitive is pickable with {@link Scene#pick}.
      * @param {Boolean} [options.incrementallyLoadTextures=true] Determine if textures may continue to stream in after the model is loaded.
      * @param {Boolean} [options.asynchronous=true] Determines if model WebGL resource creation will be spread out over several frames or block until completion once all glTF files are loaded.
-     * @param {Boolean} [options.castShadows=true] Determines whether the model casts shadows from each light source.
-     * @param {Boolean} [options.receiveShadows=true] Determines whether the model receives shadows from shadow casters in the scene.
+     * @param {ShadowMode} [options.shadows=ShadowMode.ENABLED] Determines whether the model casts or receives shadows from each light source.
      * @param {Boolean} [options.debugShowBoundingVolume=false] For debugging only. Draws the bounding sphere for each {@link DrawCommand} in the model.
      * @param {Boolean} [options.debugWireframe=false] For debugging only. Draws the model in wireframe.
      *
@@ -997,7 +1049,7 @@ define([
         var cacheKey = defaultValue(options.cacheKey, getAbsoluteUri(url));
 
         options = clone(options);
-        options.basePath = getBaseUri(url);
+        options.basePath = getBaseUri(url, true);
         options.cacheKey = cacheKey;
         var model = new Model(options);
 
@@ -1016,7 +1068,7 @@ define([
             setCachedGltf(model, cachedGltf);
             gltfCache[cacheKey] = cachedGltf;
 
-            loadArrayBuffer(url, options.headers).then(function(arrayBuffer) {
+            RequestScheduler.request(url, loadArrayBuffer, options.headers, options.requestType).then(function(arrayBuffer) {
                 var array = new Uint8Array(arrayBuffer);
                 if (containsGltfMagic(array)) {
                     // Load binary glTF
@@ -1222,9 +1274,9 @@ define([
                 }
                 else if (buffer.type === 'arraybuffer') {
                     ++model._loadResources.pendingBufferLoads;
-                    var uri = new Uri(buffer.uri);
-                    var bufferPath = uri.resolve(model._baseUri).toString();
-                    loadArrayBuffer(bufferPath).then(bufferLoad(model, id)).otherwise(getFailedLoadFunction(model, 'buffer', bufferPath));
+                    var bufferPath = joinUrls(model._baseUri, buffer.uri);
+                    var promise = RequestScheduler.request(bufferPath, loadArrayBuffer, undefined, model._requestType);
+                    promise.then(bufferLoad(model, id)).otherwise(getFailedLoadFunction(model, 'buffer', bufferPath));
                 }
             }
         }
@@ -1232,20 +1284,52 @@ define([
 
     function parseBufferViews(model) {
         var bufferViews = model.gltf.bufferViews;
-        for (var id in bufferViews) {
+        var id;
+
+        var vertexBuffersToCreate = model._loadResources.vertexBuffersToCreate;
+
+        // Only ARRAY_BUFFER here.  ELEMENT_ARRAY_BUFFER created below.
+        for (id in bufferViews) {
             if (bufferViews.hasOwnProperty(id)) {
                 if (bufferViews[id].target === WebGLConstants.ARRAY_BUFFER) {
-                    model._loadResources.buffersToCreate.enqueue(id);
+                    vertexBuffersToCreate.enqueue(id);
+                }
+            }
+        }
+
+        var indexBuffersToCreate = model._loadResources.indexBuffersToCreate;
+        var indexBufferIds = {};
+
+        // The Cesium Renderer requires knowing the datatype for an index buffer
+        // at creation type, which is not part of the glTF bufferview so loop
+        // through glTF accessors to create the bufferview's index buffer.
+        var accessors = model.gltf.accessors;
+        for (id in accessors) {
+            if (accessors.hasOwnProperty(id)) {
+                var accessor = accessors[id];
+                var bufferViewId = accessor.bufferView;
+                var bufferView = bufferViews[bufferViewId];
+
+                if ((bufferView.target === WebGLConstants.ELEMENT_ARRAY_BUFFER) && !defined(indexBufferIds[bufferViewId])) {
+                    indexBufferIds[bufferViewId] = true;
+                    indexBuffersToCreate.enqueue({
+                        id : bufferViewId,
+                        // In theory, several glTF accessors with different componentTypes could
+                        // point to the same glTF bufferView, which would break this.
+                        // In practice, it is unlikely as it will be UNSIGNED_SHORT.
+                        componentType : accessor.componentType
+                    });
                 }
             }
         }
     }
 
-    function shaderLoad(model, id) {
+    function shaderLoad(model, type, id) {
         return function(source) {
             var loadResources = model._loadResources;
             loadResources.shaders[id] = {
                 source : source,
+                type : type,
                 bufferView : undefined
             };
             --loadResources.pendingShaderLoads;
@@ -1273,9 +1357,9 @@ define([
                     };
                 } else {
                     ++model._loadResources.pendingShaderLoads;
-                    var uri = new Uri(shader.uri);
-                    var shaderPath = uri.resolve(model._baseUri).toString();
-                    loadText(shaderPath).then(shaderLoad(model, id)).otherwise(getFailedLoadFunction(model, 'shader', shaderPath));
+                    var shaderPath = joinUrls(model._baseUri, shader.uri);
+                    var promise = RequestScheduler.request(shaderPath, loadText, undefined, model.requestType);
+                    promise.then(shaderLoad(model, shader.type, id)).otherwise(getFailedLoadFunction(model, 'shader', shaderPath));
                 }
             }
         }
@@ -1320,8 +1404,7 @@ define([
                     });
                 } else {
                     ++model._loadResources.pendingTextureLoads;
-                    var uri = new Uri(gltfImage.uri);
-                    var imagePath = uri.resolve(model._baseUri).toString();
+                    var imagePath = joinUrls(model._baseUri, gltfImage.uri);
                     loadImage(imagePath).then(imageLoad(model, id)).otherwise(getFailedLoadFunction(model, 'image', imagePath));
                 }
             }
@@ -1491,53 +1574,115 @@ define([
 
     ///////////////////////////////////////////////////////////////////////////
 
-    function createBuffers(model, context) {
+    var CreateVertexBufferJob = function() {
+        this.id = undefined;
+        this.model = undefined;
+        this.context = undefined;
+    };
+
+    CreateVertexBufferJob.prototype.set = function(id, model, context) {
+        this.id = id;
+        this.model = model;
+        this.context = context;
+    };
+
+    CreateVertexBufferJob.prototype.execute = function() {
+        createVertexBuffer(this.id, this.model, this.context);
+    };
+
+    ///////////////////////////////////////////////////////////////////////////
+
+    function createVertexBuffer(bufferViewId, model, context) {
+        var loadResources = model._loadResources;
+        var bufferViews = model.gltf.bufferViews;
+        var bufferView = bufferViews[bufferViewId];
+
+        var vertexBuffer = Buffer.createVertexBuffer({
+            context : context,
+            typedArray : loadResources.getBuffer(bufferView),
+            usage : BufferUsage.STATIC_DRAW
+        });
+        vertexBuffer.vertexArrayDestroyable = false;
+        model._rendererResources.buffers[bufferViewId] = vertexBuffer;
+    }
+
+    ///////////////////////////////////////////////////////////////////////////
+
+    var CreateIndexBufferJob = function() {
+        this.id = undefined;
+        this.componentType = undefined;
+        this.model = undefined;
+        this.context = undefined;
+    };
+
+    CreateIndexBufferJob.prototype.set = function(id, componentType, model, context) {
+        this.id = id;
+        this.componentType = componentType;
+        this.model = model;
+        this.context = context;
+    };
+
+    CreateIndexBufferJob.prototype.execute = function() {
+        createIndexBuffer(this.id, this.componentType, this.model, this.context);
+    };
+
+    ///////////////////////////////////////////////////////////////////////////
+
+    function createIndexBuffer(bufferViewId, componentType, model, context) {
+        var loadResources = model._loadResources;
+        var bufferViews = model.gltf.bufferViews;
+        var bufferView = bufferViews[bufferViewId];
+
+        var indexBuffer = Buffer.createIndexBuffer({
+            context : context,
+            typedArray : loadResources.getBuffer(bufferView),
+            usage : BufferUsage.STATIC_DRAW,
+            indexDatatype : componentType
+        });
+        indexBuffer.vertexArrayDestroyable = false;
+        model._rendererResources.buffers[bufferViewId] = indexBuffer;
+    }
+
+    var scratchVertexBufferJob = new CreateVertexBufferJob();
+    var scratchIndexBufferJob = new CreateIndexBufferJob();
+
+    function createBuffers(model, frameState) {
         var loadResources = model._loadResources;
 
         if (loadResources.pendingBufferLoads !== 0) {
             return;
         }
 
-        var bufferView;
-        var bufferViews = model.gltf.bufferViews;
-        var rendererBuffers = model._rendererResources.buffers;
+        var context = frameState.context;
+        var vertexBuffersToCreate = loadResources.vertexBuffersToCreate;
+        var indexBuffersToCreate = loadResources.indexBuffersToCreate;
+        var i;
 
-        while (loadResources.buffersToCreate.length > 0) {
-            var bufferViewId = loadResources.buffersToCreate.dequeue();
-            bufferView = bufferViews[bufferViewId];
-
-            // Only ARRAY_BUFFER here.  ELEMENT_ARRAY_BUFFER created below.
-            var vertexBuffer = Buffer.createVertexBuffer({
-                context : context,
-                typedArray : loadResources.getBuffer(bufferView),
-                usage : BufferUsage.STATIC_DRAW
-            });
-            vertexBuffer.vertexArrayDestroyable = false;
-            rendererBuffers[bufferViewId] = vertexBuffer;
-        }
-
-        // The Cesium Renderer requires knowing the datatype for an index buffer
-        // at creation type, which is not part of the glTF bufferview so loop
-        // through glTF accessors to create the bufferview's index buffer.
-        var accessors = model.gltf.accessors;
-        for (var id in accessors) {
-            if (accessors.hasOwnProperty(id)) {
-                var accessor = accessors[id];
-                bufferView = bufferViews[accessor.bufferView];
-
-                if ((bufferView.target === WebGLConstants.ELEMENT_ARRAY_BUFFER) && !defined(rendererBuffers[accessor.bufferView])) {
-                    var indexBuffer = Buffer.createIndexBuffer({
-                        context : context,
-                        typedArray : loadResources.getBuffer(bufferView),
-                        usage : BufferUsage.STATIC_DRAW,
-                        indexDatatype : accessor.componentType
-                    });
-                    indexBuffer.vertexArrayDestroyable = false;
-                    rendererBuffers[accessor.bufferView] = indexBuffer;
-                    // In theory, several glTF accessors with different componentTypes could
-                    // point to the same glTF bufferView, which would break this.
-                    // In practice, it is unlikely as it will be UNSIGNED_SHORT.
+        if (model.asynchronous) {
+            while (vertexBuffersToCreate.length > 0) {
+                scratchVertexBufferJob.set(vertexBuffersToCreate.peek(), model, context);
+                if (!frameState.jobScheduler.execute(scratchVertexBufferJob, JobType.BUFFER)) {
+                    break;
                 }
+                vertexBuffersToCreate.dequeue();
+            }
+
+            while (indexBuffersToCreate.length > 0) {
+                i = indexBuffersToCreate.peek();
+                scratchIndexBufferJob.set(i.id, i.componentType, model, context);
+                if (!frameState.jobScheduler.execute(scratchIndexBufferJob, JobType.BUFFER)) {
+                    break;
+                }
+                indexBuffersToCreate.dequeue();
+            }
+        } else {
+            while (vertexBuffersToCreate.length > 0) {
+                createVertexBuffer(vertexBuffersToCreate.dequeue(), model, context);
+            }
+
+            while (indexBuffersToCreate.length > 0) {
+                i = indexBuffersToCreate.dequeue();
+                createIndexBuffer(i.id, i.componentType, model, context);
             }
         }
     }
@@ -1629,7 +1774,7 @@ define([
         }
         return undefined;
     }
-    
+
     function modifyShaderForQuantizedAttributes(shader, programName, model, context) {
         var quantizedUniforms = {};
         model._quantizedUniforms[programName] = quantizedUniforms;
@@ -1709,6 +1854,24 @@ define([
         return shader;
     }
 
+    var CreateProgramJob = function() {
+        this.id = undefined;
+        this.model = undefined;
+        this.context = undefined;
+    };
+
+    CreateProgramJob.prototype.set = function(id, model, context) {
+        this.id = id;
+        this.model = model;
+        this.context = context;
+    };
+
+    CreateProgramJob.prototype.execute = function() {
+        createProgram(this.id, this.model, this.context);
+    };
+
+    ///////////////////////////////////////////////////////////////////////////
+
     function createProgram(id, model, context) {
         var programs = model.gltf.programs;
         var shaders = model._loadResources.shaders;
@@ -1761,9 +1924,11 @@ define([
         }
     }
 
-    function createPrograms(model, context) {
+    var scratchCreateProgramJob = new CreateProgramJob();
+
+    function createPrograms(model, frameState) {
         var loadResources = model._loadResources;
-        var id;
+        var programsToCreate = loadResources.programsToCreate;
 
         if (loadResources.pendingShaderLoads !== 0) {
             return;
@@ -1775,17 +1940,20 @@ define([
             return;
         }
 
+        var context = frameState.context;
+
         if (model.asynchronous) {
-            // Create one program per frame
-            if (loadResources.programsToCreate.length > 0) {
-                id = loadResources.programsToCreate.dequeue();
-                createProgram(id, model, context);
+            while (programsToCreate.length > 0) {
+                scratchCreateProgramJob.set(programsToCreate.peek(), model, context);
+                if (!frameState.jobScheduler.execute(scratchCreateProgramJob, JobType.PROGRAM)) {
+                    break;
+                }
+                programsToCreate.dequeue();
             }
         } else {
             // Create all loaded programs this frame
-            while (loadResources.programsToCreate.length > 0) {
-                id = loadResources.programsToCreate.dequeue();
-                createProgram(id, model, context);
+            while (programsToCreate.length > 0) {
+                createProgram(programsToCreate.dequeue(), model, context);
             }
         }
     }
@@ -1847,6 +2015,26 @@ define([
         }
     }
 
+    ///////////////////////////////////////////////////////////////////////////
+
+    var CreateTextureJob = function() {
+        this.gltfTexture = undefined;
+        this.model = undefined;
+        this.context = undefined;
+    };
+
+    CreateTextureJob.prototype.set = function(gltfTexture, model, context) {
+        this.gltfTexture = gltfTexture;
+        this.model = model;
+        this.context = context;
+    };
+
+    CreateTextureJob.prototype.execute = function() {
+        createTexture(this.gltfTexture, this.model, this.context);
+    };
+
+    ///////////////////////////////////////////////////////////////////////////
+
     function createTexture(gltfTexture, model, context) {
         var textures = model.gltf.textures;
         var texture = textures[gltfTexture.id];
@@ -1899,21 +2087,24 @@ define([
         model._rendererResources.textures[gltfTexture.id] = tx;
     }
 
-    function createTextures(model, context) {
-        var loadResources = model._loadResources;
-        var gltfTexture;
+    var scratchCreateTextureJob = new CreateTextureJob();
+
+    function createTextures(model, frameState) {
+        var context = frameState.context;
+        var texturesToCreate = model._loadResources.texturesToCreate;
 
         if (model.asynchronous) {
-            // Create one texture per frame
-            if (loadResources.texturesToCreate.length > 0) {
-                gltfTexture = loadResources.texturesToCreate.dequeue();
-                createTexture(gltfTexture, model, context);
+            while (texturesToCreate.length > 0) {
+                scratchCreateTextureJob.set(texturesToCreate.peek(), model, context);
+                if (!frameState.jobScheduler.execute(scratchCreateTextureJob, JobType.TEXTURE)) {
+                    break;
+                }
+                texturesToCreate.dequeue();
             }
         } else {
             // Create all loaded textures this frame
-            while (loadResources.texturesToCreate.length > 0) {
-                gltfTexture = loadResources.texturesToCreate.dequeue();
-                createTexture(gltfTexture, model, context);
+            while (texturesToCreate.length > 0) {
+                createTexture(texturesToCreate.dequeue(), model, context);
             }
         }
     }
@@ -2169,14 +2360,19 @@ define([
                             // with an attribute that wasn't used and the asset wasn't optimized.
                             if (defined(attributeLocation)) {
                                 var a = accessors[primitiveAttributes[attributeName]];
+
+                                var componentType = a.componentType;
+                                // XXX: if uint32, pretend it's really uint16.
+                                componentType = componentType === 5125 ? 5123 : componentType;
+
                                 attributes.push({
                                     index : attributeLocation,
                                     vertexBuffer : rendererBuffers[a.bufferView],
                                     componentsPerAttribute : getModelAccessor(a).componentsPerAttribute,
-                                    componentDatatype : a.componentType,
-                                    normalize : false,
-                                    offsetInBytes : a.byteOffset,
-                                    strideInBytes : a.byteStride
+                                    componentDatatype      : componentType,
+                                    normalize              : false,
+                                    offsetInBytes          : a.byteOffset,
+                                    strideInBytes          : a.byteStride
                                 });
                             }
                         }
@@ -2386,7 +2582,7 @@ define([
         },
         MODELINVERSETRANSPOSE : function(uniformState, model) {
             return function() {
-                return uniformState.inverseTranposeModel;
+                return uniformState.inverseTransposeModel;
             };
         },
         MODELVIEWINVERSETRANSPOSE : function(uniformState, model) {
@@ -2915,6 +3111,9 @@ define([
                     mesh : runtimeMeshesByName[mesh.name]
                 };
 
+                var castShadows = ShadowMode.castShadows(model._shadows);
+                var receiveShadows = ShadowMode.receiveShadows(model._shadows);
+                
                 var command = new DrawCommand({
                     boundingVolume : new BoundingSphere(), // updated in update()
                     cull : model.cull,
@@ -2924,8 +3123,8 @@ define([
                     count : count,
                     offset : offset,
                     shaderProgram : rendererPrograms[technique.program],
-                    castShadows : model._castShadows,
-                    receiveShadows : model._receiveShadows,
+                    castShadows : castShadows,
+                    receiveShadows : receiveShadows,
                     uniformMap : uniformMap,
                     renderState : rs,
                     owner : owner,
@@ -3098,11 +3297,11 @@ define([
                 createVertexArrays(model, context);
             }
         } else {
-            createBuffers(model, context); // using glTF bufferViews
-            createPrograms(model, context);
+            createBuffers(model, frameState); // using glTF bufferViews
+            createPrograms(model, frameState);
             createSamplers(model, context);
             loadTexturesFromBufferViews(model);
-            createTextures(model, context);
+            createTextures(model, frameState);
         }
 
         createSkins(model);
@@ -3353,12 +3552,11 @@ define([
     }
 
     function updateShadows(model) {
-        if ((model.castShadows !== model._castShadows) || (model.receiveShadows !== model._receiveShadows)) {
-            model._castShadows = model.castShadows;
-            model._receiveShadows = model.receiveShadows;
+        if (model.shadows !== model._shadows) {
+            model._shadows = model.shadows;
 
-            var castShadows = model.castShadows;
-            var receiveShadows = model.receiveShadows;
+            var castShadows = ShadowMode.castShadows(model.shadows);
+            var receiveShadows = ShadowMode.receiveShadows(model.shadows);
             var nodeCommands = model._nodeCommands;
             var length = nodeCommands.length;
 
@@ -3751,7 +3949,6 @@ define([
         // and then have them visible immediately when show is set to true.
         if (show && !this._ignoreCommands) {
             // PERFORMANCE_IDEA: This is terrible
-            var commandList = frameState.commandList;
             var passes = frameState.passes;
             var nodeCommands = this._nodeCommands;
             var length = nodeCommands.length;
@@ -3766,12 +3963,12 @@ define([
                     nc = nodeCommands[i];
                     if (nc.show) {
                         var command = nc.command;
-                        commandList.push(command);
+                        frameState.addCommand(command);
 
                         boundingVolume = command.boundingVolume;
                         if (frameState.mode === SceneMode.SCENE2D &&
                             (boundingVolume.center.y + boundingVolume.radius > idl2D || boundingVolume.center.y - boundingVolume.radius < idl2D)) {
-                            commandList.push(nc.command2D);
+                            frameState.addCommand(nc.command2D);
                         }
                     }
                 }
@@ -3782,12 +3979,12 @@ define([
                     nc = nodeCommands[i];
                     if (nc.show) {
                         var pickCommand = nc.pickCommand;
-                        commandList.push(pickCommand);
+                        frameState.addCommand(pickCommand);
 
                         boundingVolume = pickCommand.boundingVolume;
                         if (frameState.mode === SceneMode.SCENE2D &&
                             (boundingVolume.center.y + boundingVolume.radius > idl2D || boundingVolume.center.y - boundingVolume.radius < idl2D)) {
-                            commandList.push(nc.pickCommand2D);
+                            frameState.addCommand(nc.pickCommand2D);
                         }
                     }
                 }
