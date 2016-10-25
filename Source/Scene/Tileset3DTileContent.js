@@ -32,7 +32,7 @@ define([
          * The following properties are part of the {@link Cesium3DTileContent} interface.
          */
         this.state = Cesium3DTileContentState.UNLOADED;
-        this.batchTableResources = undefined;
+        this.batchTable = undefined;
         this.featurePropertiesDirty = false;
 
         this._contentReadyToProcessPromise = when.defer();
@@ -122,6 +122,13 @@ define([
      * Part of the {@link Cesium3DTileContent} interface.
      */
     Tileset3DTileContent.prototype.applyDebugSettings = function(enabled, color) {
+    };
+
+    /**
+     * Part of the {@link Cesium3DTileContent} interface.
+     */
+    Tileset3DTileContent.prototype.applyStyleWithShader = function(frameState, style) {
+        return false;
     };
 
     /**

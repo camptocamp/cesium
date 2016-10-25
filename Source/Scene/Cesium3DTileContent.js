@@ -21,7 +21,7 @@ define([
      *
      * @see Batched3DModel3DTileContent
      * @see Instanced3DModel3DTileContent
-     * @see Points3DTileContent
+     * @see PointCloud3DTileContent
      * @see Composite3DTileContent
      * @see Tileset3DTileContent
      * @see Empty3DTileContent
@@ -45,12 +45,12 @@ define([
         /**
          * Gets the batch table texture for this tile.
          *
-         * @type {Cesium3DTileBatchTableResources}
+         * @type {Cesium3DTileBatchTable}
          * @readonly
          *
          * @private
          */
-        this.batchTableResources = undefined;
+        this.batchTable = undefined;
 
         /**
          * Gets or sets if any feature's property changed.  Used to
@@ -195,6 +195,25 @@ define([
      * @private
      */
     Cesium3DTileContent.prototype.applyDebugSettings = function(enabled, color) {
+        DeveloperError.throwInstantiationError();
+    };
+
+    /**
+     * Apply a style to the content using a shader instead of a batch table. Currently this is only
+     * applicable for {@link PointCloud3DTileContent}.
+     * <p>
+     * This is used to implement the <code>Cesium3DTileContent</code> interface, but is
+     * not part of the public Cesium API.
+     * </p>
+     *
+     * @param {FrameSate} frameState The frame state.
+     * @param {Cesium3DTileStyle} style The style.
+     *
+     * @returns {Boolean} <code>true</code> if this content is styled with a shader; otherwise, <code>false</code>.
+     *
+     * @private
+     */
+    Cesium3DTileContent.prototype.applyStyleWithShader = function(frameState, style) {
         DeveloperError.throwInstantiationError();
     };
 

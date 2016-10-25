@@ -19,7 +19,9 @@ define([
     '../Core/RequestType',
     '../ThirdParty/when',
     './BillboardCollection',
+    './Cesium3DTileBatchTable',
     './Cesium3DTileContentState',
+    './Cesium3DTileFeature',
     './HorizontalOrigin',
     './LabelCollection',
     './PointPrimitiveCollection',
@@ -44,7 +46,9 @@ define([
     RequestType,
     when,
     BillboardCollection,
+    Cesium3DTileBatchTable,
     Cesium3DTileContentState,
+    Cesium3DTileFeature,
     HorizontalOrigin,
     LabelCollection,
     PointPrimitiveCollection,
@@ -59,8 +63,6 @@ define([
      */
     function Vector3DTileContent(tileset, tile, url) {
         this._labelCollection = undefined;
-        this._pointCollection = undefined;
-        this._billboardCollection = undefined;
         this._polylineCollection = undefined;
         this._url = url;
         this._tileset = tileset;
@@ -70,12 +72,13 @@ define([
          * The following properties are part of the {@link Cesium3DTileContent} interface.
          */
         this.state = Cesium3DTileContentState.UNLOADED;
-        this.batchTableResources = undefined;
+        this.batchTable = undefined;
         this.featurePropertiesDirty = false;
-        this.boundingSphere = tile.contentBoundingVolume.boundingSphere;
 
         this._contentReadyToProcessPromise = when.defer();
         this._readyPromise = when.defer();
+        this._featuresLength = 0;
+        this._features = undefined;
     }
 
     defineProperties(Vector3DTileContent.prototype, {
@@ -84,8 +87,7 @@ define([
          */
         featuresLength : {
             get : function() {
-                // TODO: implement batchTable for vctr tile format
-                return 0;
+                return this._featuresLength;
             }
         },
 
@@ -117,20 +119,38 @@ define([
         }
     });
 
+    function createFeatures(content) {
+        var tileset = content._tileset;
+        var featuresLength = content._featuresLength;
+        if (!defined(content._features) && (featuresLength > 0)) {
+            var features = new Array(featuresLength);
+            for (var i = 0; i < featuresLength; ++i) {
+                features[i] = new Cesium3DTileFeature(tileset, content, i);
+            }
+            content._features = features;
+        }
+    }
+
     /**
      * Part of the {@link Cesium3DTileContent} interface.
      */
     Vector3DTileContent.prototype.hasProperty = function(name) {
-        // TODO: implement batchTable for vctr tile format
-        return false;
+        return this.batchTable.hasProperty(name);
     };
 
     /**
      * Part of the {@link Cesium3DTileContent} interface.
      */
     Vector3DTileContent.prototype.getFeature = function(batchId) {
-        // TODO: implement batchTable for vctr tile format
-        return undefined;
+        var featuresLength = this._featuresLength;
+        //>>includeStart('debug', pragmas.debug);
+        if (!defined(batchId) || (batchId < 0) || (batchId >= featuresLength)) {
+            throw new DeveloperError('batchId is required and between zero and featuresLength - 1 (' + (featuresLength - 1) + ').');
+        }
+        //>>includeEnd('debug');
+
+        createFeatures(this);
+        return this._features[batchId];
     };
 
     /**
@@ -166,8 +186,6 @@ define([
         return true;
     };
 
-    //var sizeOfUint32 = Uint32Array.BYTES_PER_ELEMENT;
-
     /**
      * Part of the {@link Cesium3DTileContent} interface.
      */
@@ -175,44 +193,25 @@ define([
         byteOffset = defaultValue(byteOffset, 0);
 
         var uint8Array = new Uint8Array(arrayBuffer);
-        /*
-        var magic = getMagic(uint8Array, byteOffset);
-        if (magic !== 'vctr') {
-            throw new DeveloperError('Invalid Vector tile.  Expected magic=vctr.  Read magic=' + magic);
-        }
-
-        var view = new DataView(arrayBuffer);
-        byteOffset += sizeOfUint32;  // Skip magic number
-
-        //>>includeStart('debug', pragmas.debug);
-        var version = view.getUint32(byteOffset, true);
-        if (version !== 1) {
-            throw new DeveloperError('Only Vector tile version 1 is supported.  Version ' + version + ' is not.');
-        }
-        //>>includeEnd('debug');
-        byteOffset += sizeOfUint32;
-
-        // Skip byteLength
-        byteOffset += sizeOfUint32;
-        */
 
         var text = getStringFromTypedArray(uint8Array, byteOffset);
         var json = JSON.parse(text);
 
-        var labelCollection = new LabelCollection();
-        //var pointCollection = new PointPrimitiveCollection();
-        //var billboardCollection = new BillboardCollection();
+        var labels = json.labels;
+        var length = labels.length;
+
+        this._featuresLength = length;
+
+        var batchTable = new Cesium3DTileBatchTable(this, length, json.batchTable, undefined);
+        this.batchTable = batchTable;
+
+        var labelCollection = new LabelCollection({
+            batchTable : batchTable
+        });
         var polylineCollection = new PolylineCollection();
 
-        var offset = new Cartesian3(0.0, 1.0, 1.0);
-        Cartesian3.normalize(offset, offset);
-        Cartesian3.multiplyByScalar(offset, 100.0, offset);
-
-        //var pinBuilder = new PinBuilder();
-
-        var length = json.length;
         for (var i = 0; i < length; ++i) {
-            var label = json[i];
+            var label = labels[i];
             var labelText = label.text;
             var cartographicArray = label.position;
 
@@ -223,40 +222,25 @@ define([
             var cartographic = new Cartographic(lon, lat, alt);
             var position = Ellipsoid.WGS84.cartographicToCartesian(cartographic);
 
-            var offsetPosition = Cartesian3.add(offset, position, new Cartesian3());
+            cartographic.height += 100.0;
+            var offsetPosition = Ellipsoid.WGS84.cartographicToCartesian(cartographic);
 
             labelCollection.add({
                 text : labelText,
-                //position : position
-                position : offsetPosition
+                position : offsetPosition,
+                horizontalOrigin : HorizontalOrigin.CENTER
             });
-            /*
-            pointCollection.add({
-                position : position,
-                pixelSize : 10.0,
-                color : Color.RED,
-                outlineColor : Color.BLACK,
-                oulineWidth : 2.0
-            });
-            */
-            /*
-            billboardCollection.add({
-                image : pinBuilder.fromColor(Color.ROYALBLUE, 48).toDataURL(),
-                position : position,
-                horizontalOrigin : HorizontalOrigin.RIGHT
-            });
-            */
             polylineCollection.add({
                 positions : [position, offsetPosition]
             });
+
+            this.batchTable.setColor(i, Color.WHITE);
         }
 
         this.state = Cesium3DTileContentState.PROCESSING;
         this._contentReadyToProcessPromise.resolve(this);
 
         this._labelCollection = labelCollection;
-        //this._pointCollection = pointCollection;
-        //this._billboardCollection = billboardCollection;
         this._polylineCollection = polylineCollection;
         this.state = Cesium3DTileContentState.READY;
         this._readyPromise.resolve(this);
@@ -271,10 +255,19 @@ define([
     /**
      * Part of the {@link Cesium3DTileContent} interface.
      */
+    Vector3DTileContent.prototype.applyStyleWithShader = function(frameState, style) {
+        return false;
+    };
+
+    /**
+     * Part of the {@link Cesium3DTileContent} interface.
+     */
     Vector3DTileContent.prototype.update = function(tileset, frameState) {
+        if (this._featuresLength === 0) {
+            return;
+        }
+        this.batchTable.update(tileset, frameState);
         this._labelCollection.update(frameState);
-        //this._pointCollection.update(frameState);
-        //this._billboardCollection.update(frameState);
         this._polylineCollection.update(frameState);
     };
 
@@ -290,8 +283,6 @@ define([
      */
     Vector3DTileContent.prototype.destroy = function() {
         this._labelCollection = this._labelCollection && this._labelCollection.destroy();
-        //this._pointCollection = this._pointCollection && this._pointCollection.destroy();
-        //this._billboardCollection = this._billboardCollection && this._billboardCollection.destroy();
         this._polylineCollection = this._polylineCollection && this._polylineCollection.destroy();
         return destroyObject(this);
     };

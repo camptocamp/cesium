@@ -16,12 +16,14 @@ define([
      * @param {Imagery} imagery The imagery tile.
      * @param {Cartesian4} textureCoordinateRectangle The texture rectangle of the tile that is covered
      *        by the imagery, where X=west, Y=south, Z=east, W=north.
+     * @param {Boolean} useWebMercatorT true to use the Web Mercator texture coordinates for this imagery tile.
      */
-    function TileImagery(imagery, textureCoordinateRectangle) {
+    function TileImagery(imagery, textureCoordinateRectangle, useWebMercatorT) {
         this.readyImagery = undefined;
         this.loadingImagery = imagery;
         this.textureCoordinateRectangle = textureCoordinateRectangle;
         this.textureTranslationAndScale = undefined;
+        this.useWebMercatorT = useWebMercatorT;
     }
 
     /**
@@ -47,10 +49,10 @@ define([
     TileImagery.prototype.processStateMachine = function(tile, frameState) {
         var loadingImagery = this.loadingImagery;
         var imageryLayer = loadingImagery.imageryLayer;
-        var imageryProvider = loadingImagery.imageryLayer.imageryProvider;
+        var imageryProvider = imageryLayer.imageryProvider;
         if (!defined(imageryProvider.getTileDataAvailable) ||
                 imageryProvider.getTileDataAvailable(loadingImagery.x, loadingImagery.y, loadingImagery.level)) {
-            loadingImagery.processStateMachine(frameState, tile._distance);
+            loadingImagery.processStateMachine(frameState, !this.useWebMercatorT, tile._distance);
         } else {
             loadingImagery.state = ImageryState.INVALID;
         }
@@ -94,7 +96,7 @@ define([
                 // Push the ancestor's load process along a bit.  This is necessary because some ancestor imagery
                 // tiles may not be attached directly to a terrain tile.  Such tiles will never load if
                 // we don't do it here.
-                closestAncestorThatNeedsLoading.processStateMachine(frameState, tile._distance);
+                closestAncestorThatNeedsLoading.processStateMachine(frameState, !this.useWebMercatorT, tile._distance);
                 return false; // not done loading
             } else {
                 // This imagery tile is failed or invalid, and we have the "best available" substitute.

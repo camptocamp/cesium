@@ -739,12 +739,8 @@ define([
 
         var context = frameState.context;
 
-<<<<<<< HEAD
-        var vs = Primitive._modifyShaderPosition(primitive._primitive, ShadowVolumeVS, frameState.scene3DOnly);
-=======
         var vs = ShadowVolumeVS;
         vs = primitive._primitive._batchTable.getVertexShaderCallback()(vs);
->>>>>>> c2c/c2c_patches
         vs = Primitive._appendShowToShader(primitive._primitive, vs);
         vs = Primitive._appendDistanceDisplayConditionToShader(primitive._primitive, vs);
         vs = Primitive._modifyShaderPosition(primitive, vs, frameState.scene3DOnly);
