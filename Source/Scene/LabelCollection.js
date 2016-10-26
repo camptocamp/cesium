@@ -203,6 +203,8 @@ define([
                 billboard.image = id;
                 billboard.translucencyByDistance = label._translucencyByDistance;
                 billboard.pixelOffsetScaleByDistance = label._pixelOffsetScaleByDistance;
+                billboard.distanceDisplayCondition = label._distanceDisplayCondition;
+                billboard._batchIndex = label._index;
             }
         }
 
@@ -242,8 +244,7 @@ define([
         glyphPixelOffset.x = widthOffset * resolutionScale;
         glyphPixelOffset.y = 0;
 
-        var heightReference = label._heightReference;
-        var verticalOrigin = (heightReference === HeightReference.NONE) ? label._verticalOrigin : VerticalOrigin.BOTTOM;
+        var verticalOrigin = label._verticalOrigin;
         for (glyphIndex = 0; glyphIndex < glyphLength; ++glyphIndex) {
             glyph = glyphs[glyphIndex];
             dimensions = glyph.dimensions;
@@ -328,11 +329,13 @@ define([
         options = defaultValue(options, defaultValue.EMPTY_OBJECT);
 
         this._scene = options.scene;
+        this._batchTable = options.batchTable;
 
         this._textureAtlas = undefined;
 
         this._billboardCollection = new BillboardCollection({
-            scene : this._scene
+            scene : this._scene,
+            batchTable : this._batchTable
         });
         this._billboardCollection.destroyTextureAtlas = false;
 
@@ -448,6 +451,7 @@ define([
      */
     LabelCollection.prototype.add = function(options) {
         var label = new Label(options, this);
+        label._index = this._labels.length;
 
         this._labels.push(label);
         this._labelsToUpdate.push(label);
