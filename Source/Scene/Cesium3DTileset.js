@@ -24,6 +24,7 @@ define([
         '../ThirdParty/Uri',
         '../ThirdParty/when',
         './Cesium3DTile',
+        './Cesium3DTileColorBlendMode',
         './Cesium3DTileRefine',
         './Cesium3DTileStyleEngine',
         './CullingVolume',
@@ -58,6 +59,7 @@ define([
         Uri,
         when,
         Cesium3DTile,
+        Cesium3DTileColorBlendMode,
         Cesium3DTileRefine,
         Cesium3DTileStyleEngine,
         CullingVolume,
@@ -148,6 +150,8 @@ define([
 
         this._refineToVisible = defaultValue(options.refineToVisible, false);
 
+        this._distanceDisplayCondition = options.distanceDisplayCondition;
+
         /**
          * Whether the tileset should should refine based on a dynamic screen space error. Tiles that are further
          * away will be rendered with lower detail than closer tiles. This improves performance by rendering fewer
@@ -226,6 +230,25 @@ define([
         this._maximumScreenSpaceError = defaultValue(options.maximumScreenSpaceError, 16);
         this._maximumNumberOfLoadedTiles = defaultValue(options.maximumNumberOfLoadedTiles, 256);
         this._styleEngine = new Cesium3DTileStyleEngine();
+
+        /**
+         * Defines how per-feature colors set from the Cesium API or declarative styling blend with the source colors from
+         * the original feature, e.g. glTF material or per-point color in the tile.
+         *
+         * @type {Cesium3DTileColorBlendMode}
+         * @default Cesium3DTileColorBlendMode.HIGHLIGHT
+         */
+        this.colorBlendMode = Cesium3DTileColorBlendMode.HIGHLIGHT;
+
+        /**
+         * Defines the value used to linearly interpolate between the source color and feature color when the colorBlendMode is MIX.
+         * A value of 0.0 results in the source color while a value of 1.0 results in the feature color, with any value in-between
+         * resulting in a mix of the source color and feature color.
+         *
+         * @type {Number}
+         * @default 0.5
+         */
+        this.colorBlendAmount = 0.5;
 
         this._modelMatrix = defined(options.modelMatrix) ? Matrix4.clone(options.modelMatrix) : Matrix4.clone(Matrix4.IDENTITY);
 
@@ -752,6 +775,12 @@ define([
             get : function() {
                 return this._styleEngine;
             }
+        },
+
+        distanceDisplayCondition : {
+            get : function() {
+                return this._distanceDisplayCondition;
+            }
         }
     });
 
@@ -1124,6 +1153,12 @@ define([
             t.selected = false;
             t.replaced = false;
             ++stats.visited;
+
+            var displayCondition = tileset.distanceDisplayCondition;
+            var distanceToCamera = t.distanceToCamera;
+            if (defined(displayCondition) && (distanceToCamera < displayCondition.near || distanceToCamera > displayCondition.far)) {
+                continue;
+            }
 
             var visibilityPlaneMask = t.visibilityPlaneMask;
             var fullyVisible = (visibilityPlaneMask === CullingVolume.MASK_INSIDE);
