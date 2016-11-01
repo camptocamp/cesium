@@ -103,6 +103,7 @@ define([
     function WebMapTileServiceImageryProvider(options) {
         options = defaultValue(options, defaultValue.EMPTY_OBJECT);
 
+        //>>includeStart('debug', pragmas.debug);
         if (!defined(options.url)) {
             throw new DeveloperError('options.url is required.');
         }
@@ -115,6 +116,7 @@ define([
         if (!defined(options.tileMatrixSetID)) {
             throw new DeveloperError('options.tileMatrixSetID is required.');
         }
+        //>>includeEnd('debug');
 
         this._url = options.url;
         this._layer = options.layer;
@@ -143,9 +145,11 @@ define([
         var swTile = this._tilingScheme.positionToTileXY(Rectangle.southwest(this._rectangle), this._minimumLevel);
         var neTile = this._tilingScheme.positionToTileXY(Rectangle.northeast(this._rectangle), this._minimumLevel);
         var tileCount = (Math.abs(neTile.x - swTile.x) + 1) * (Math.abs(neTile.y - swTile.y) + 1);
+        //>>includeStart('debug', pragmas.debug);
         if (tileCount > 4) {
             throw new DeveloperError('The imagery provider\'s rectangle and minimumLevel indicate that there are ' + tileCount + ' tiles at the minimum level. Imagery providers with more than four tiles at the minimum level are not supported.');
         }
+        //>>includeEnd('debug');
 
         this._errorEvent = new Event();
 
