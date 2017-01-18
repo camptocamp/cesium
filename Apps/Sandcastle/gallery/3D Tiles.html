@@ -136,7 +136,8 @@ function loadTileset(url) {
             "outlineColor" : "rgb(255, 0, 0)",
             "outlineWidth" : "10",
             "labelStyle" : "2",
-            "font" : "'50px cursive'"
+            "font" : "'50px cursive'",
+            "backgroundEnabled" : "true"
         });
         addStyleUI();
 
@@ -147,6 +148,10 @@ function loadTileset(url) {
             }
 
             //console.log('Loading: requests: ' + numberOfPendingRequests + ', processing: ' + numberProcessing);
+        });
+
+        tileset.allTilesLoaded.addEventListener(function() {
+            //console.log('All tiles are loaded');
         });
 
         tileset.tileUnload.addEventListener(function(tile) {
@@ -404,6 +409,10 @@ Sandcastle.addToolbarButton('Freeze on/off', function() {
 
 Sandcastle.addToolbarButton('Colorize on/off', function() {
     tileset.debugColorizeTiles = !tileset.debugColorizeTiles;
+});
+
+Sandcastle.addToolbarButton('Wireframe on/off', function() {
+    tileset.debugWireframe = !tileset.debugWireframe;
 });
 
 Sandcastle.addToolbarButton('BV on/off', function() {
