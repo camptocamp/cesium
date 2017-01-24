@@ -703,7 +703,7 @@ define([
         }
         //>>includeEnd('debug');
 
-        if (level < this._minimumRetrievingLevel || level > this._maximumRetrievingLevel ||
+        if (level <= this._minimumRetrievingLevel || level >= this._maximumRetrievingLevel ||
                 !this.getTileDataAvailable(x, y, level)) {
             return UrlTemplateImageryProvider.transparentCanvas;
         }
