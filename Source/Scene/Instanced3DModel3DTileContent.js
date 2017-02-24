@@ -101,7 +101,20 @@ define([
          */
         featuresLength : {
             get : function() {
-                return this._modelInstanceCollection.length;
+                if (defined(this._modelInstanceCollection)) {
+                    return this._modelInstanceCollection.length;
+                } else {
+                    return 0;
+                }
+            }
+        },
+
+        /**
+         * Part of the {@link Cesium3DTileContent} interface.
+         */
+        pointsLength : {
+            get : function() {
+                return 0;
             }
         },
 
@@ -243,7 +256,7 @@ define([
 
         var batchTableBinaryByteLength = view.getUint32(byteOffset, true);
         byteOffset += sizeOfUint32;
-        
+
         var gltfFormat = view.getUint32(byteOffset, true);
         //>>includeStart('debug', pragmas.debug);
         if (gltfFormat !== 1 && gltfFormat !== 0) {
@@ -300,9 +313,6 @@ define([
         var collectionOptions = {
             instances : new Array(instancesLength),
             batchTable : this.batchTable,
-            boundingVolume : this._tile.contentBoundingVolume.boundingVolume,
-            center : undefined,
-            transform : this._tile.computedTransform,
             cull : false, // Already culled by 3D Tiles
             url : undefined,
             requestType : RequestType.TILES3D,
@@ -321,8 +331,6 @@ define([
         }
 
         var eastNorthUp = featureTable.getGlobalProperty('EAST_NORTH_UP');
-
-        var center = new Cartesian3();
 
         var instances = collectionOptions.instances;
         var instancePosition = new Cartesian3();
@@ -364,7 +372,6 @@ define([
             }
             Cartesian3.unpack(position, 0, instancePosition);
             instanceTranslationRotationScale.translation = instancePosition;
-            Cartesian3.add(center, instancePosition, center);
 
             // Get the instance rotation
             var normalUp = featureTable.getProperty('NORMAL_UP', i, ComponentDatatype.FLOAT, 3);
@@ -426,8 +433,8 @@ define([
 
             // Get the batchId
             var batchId;
-            if (defined(featureTable.BATCH_ID)) {
-                var componentType = defaultValue(featureTable.BATCH_ID.componentType, ComponentDatatype.UNSIGNED_SHORT);
+            if (defined(featureTable.json.BATCH_ID)) {
+                var componentType = defaultValue(featureTable.json.BATCH_ID.componentType, ComponentDatatype.UNSIGNED_SHORT);
                 batchId = featureTable.getProperty('BATCH_ID', i, componentType);
             } else {
                 // If BATCH_ID semantic is undefined, batchId is just the instance number
@@ -442,9 +449,6 @@ define([
                 batchId : batchId
             };
         }
-
-        center = Cartesian3.divideByScalar(center, instancesLength, center);
-        collectionOptions.center = center;
 
         var modelInstanceCollection = new ModelInstanceCollection(collectionOptions);
         this._modelInstanceCollection = modelInstanceCollection;
@@ -490,7 +494,7 @@ define([
         // the content's resource loading.  In the READY state, it will
         // actually generate commands.
         this.batchTable.update(tileset, frameState);
-        this._modelInstanceCollection.transform = this._tile.computedTransform;
+        this._modelInstanceCollection.modelMatrix = this._tile.computedTransform;
         this._modelInstanceCollection.shadows = this._tileset.shadows;
         this._modelInstanceCollection.debugWireframe = this._tileset.debugWireframe;
         this._modelInstanceCollection.update(frameState);

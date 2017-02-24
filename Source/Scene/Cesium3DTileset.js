@@ -90,8 +90,6 @@ define([
      * @param {Number} [options.dynamicScreenSpaceErrorDensity=0.00278] Density used to adjust the dynamic screen space error, similar to fog density.
      * @param {Number} [options.dynamicScreenSpaceErrorFactor=4.0] A factor used to increase the computed dynamic screen space error.
      * @param {Number} [options.dynamicScreenSpaceErrorHeightFalloff=0.25] A ratio of the tileset's height at which the density starts to falloff.
-     * @param {Boolean} [options.debugShowStatistics=false] For debugging only. Determines if rendering statistics are output to the console.
-     * @param {Boolean} [options.debugShowPickStatistics=false] For debugging only. Determines if rendering statistics for picking are output to the console.
      * @param {Boolean} [options.debugFreezeFrame=false] For debugging only. Determines if only the tiles from last frame should be used for rendering.
      * @param {Boolean} [options.debugColorizeTiles=false] For debugging only. When true, assigns a random color to each tile.
      * @param {Boolean} [options.debugWireframe=false] For debugging only. When true, render's each tile's content as a wireframe.
@@ -218,7 +216,7 @@ define([
 
         /**
          * Determines whether the tileset casts or receives shadows from each light source.
-         *  
+         *
          * @type {ShadowMode}
          * @default ShadowMode.ENABLED
          */
@@ -257,30 +255,6 @@ define([
 
         this._modelMatrix = defined(options.modelMatrix) ? Matrix4.clone(options.modelMatrix) : Matrix4.clone(Matrix4.IDENTITY);
 
-        /**
-         * This property is for debugging only; it is not optimized for production use.
-         * <p>
-         * Determines if rendering statistics are output to the console.
-         * </p>
-         *
-         * @type {Boolean}
-         * @default false
-         */
-        this.debugShowStatistics = defaultValue(options.debugShowStatistics, false);
-        this._debugShowStatistics = false;
-
-        /**
-         * This property is for debugging only; it is not optimized for production use.
-         * <p>
-         * Determines if rendering statistics for picking are output to the console.
-         * </p>
-         *
-         * @type {Boolean}
-         * @default false
-         */
-        this.debugShowPickStatistics = defaultValue(options.debugShowPickStatistics, false);
-        this._debugShowPickStatistics = false;
-
         this._statistics = {
             // Rendering stats
             visited : 0,
@@ -291,6 +265,11 @@ define([
             numberProcessing : 0,
             numberContentReady : 0, // Number of tiles with content loaded, does not include empty tiles
             numberTotal : 0, // Number of tiles in tileset.json (and other tileset.json files as they are loaded)
+            // Features stats
+            numberOfFeaturesSelected : 0,       // number of features rendered
+            numberOfFeaturesLoaded : 0,  // number of features in memory
+            numberOfPointsSelected: 0,
+            numberOfPointsLoaded: 0,
             // Styling stats
             numberOfTilesStyled : 0,
             numberOfFeaturesStyled : 0,
@@ -313,8 +292,6 @@ define([
          * @default false
          */
         this.debugFreezeFrame = defaultValue(options.debugFreezeFrame, false);
-        this._debugFreezeFrame = this.debugFreezeFrame;
-        this._debugCameraFrustum = undefined;
 
         /**
          * This property is for debugging only; it is not optimized for production use.
@@ -493,6 +470,10 @@ define([
         this.numberProcessing = 0;
         this.numberContentReady = 0;
         this.numberTotal = 0;
+        this.numberOfFeaturesSelected = 0;
+        this.numberOfFeaturesLoaded = 0;
+        this.numberOfPointsSelected = 0;
+        this.numberOfPointsLoaded = 0;
         this.numberOfTilesStyled = 0;
         this.numberOfFeaturesStyled = 0;
     }
@@ -778,7 +759,7 @@ define([
                     throw new DeveloperError('The tileset is not loaded.  Use Cesium3DTileset.readyPromise or wait for Cesium3DTileset.ready to be true.');
                 }
                 //>>includeEnd('debug');
-                
+
                 return this._root._boundingVolume;
             }
         },
@@ -842,6 +823,15 @@ define([
         styleEngine : {
             get : function() {
                 return this._styleEngine;
+            }
+        },
+
+        /**
+         * @private
+         */
+        statistics : {
+            get : function() {
+                return this._statistics;
             }
         },
 
@@ -1061,7 +1051,6 @@ define([
     }
 
     function getScreenSpaceError(tileset, geometricError, tile, frameState) {
-        // TODO: screenSpaceError2D like QuadtreePrimitive.js
         if (geometricError === 0.0) {
             // Leaf nodes do not have any error so save the computation
             return 0.0;
@@ -1069,17 +1058,28 @@ define([
 
         // Avoid divide by zero when viewer is inside the tile
         var camera = frameState.camera;
-        var distance = Math.max(tile.distanceToCamera, CesiumMath.EPSILON7);
-        var height = frameState.context.drawingBufferHeight;
-        var sseDenominator = camera.frustum.sseDenominator;
+        var context = frameState.context;
+        var height = context.drawingBufferHeight;
 
-        var error = (geometricError * height) / (distance * sseDenominator);
+        var error;
+        if (frameState.mode === SceneMode.SCENE2D) {
+            var frustum = camera.frustum;
+            var width = context.drawingBufferWidth;
 
-        if (tileset.dynamicScreenSpaceError) {
-            var density = tileset._dynamicScreenSpaceErrorComputedDensity;
-            var factor = tileset.dynamicScreenSpaceErrorFactor;
-            var dynamicError = CesiumMath.fog(distance, density) * factor;
-            error -= dynamicError;
+            var pixelSize = Math.max(frustum.top - frustum.bottom, frustum.right - frustum.left) / Math.max(width, height);
+            error = geometricError / pixelSize;
+        } else {
+            // Avoid divide by zero when viewer is inside the tile
+            var distance = Math.max(tile.distanceToCamera, CesiumMath.EPSILON7);
+            var sseDenominator = camera.frustum.sseDenominator;
+            error = (geometricError * height) / (distance * sseDenominator);
+
+            if (tileset.dynamicScreenSpaceError) {
+                var density = tileset._dynamicScreenSpaceErrorComputedDensity;
+                var factor = tileset.dynamicScreenSpaceErrorFactor;
+                var dynamicError = CesiumMath.fog(distance, density) * factor;
+                error -= dynamicError;
+            }
         }
 
         return error;
@@ -1140,7 +1140,7 @@ define([
     function selectTile(tileset, tile, fullyVisible, frameState) {
         // There may also be a tight box around just the tile's contents, e.g., for a city, we may be
         // zoomed into a neighborhood and can cull the skyscrapers in the root node.
-        if (tile.contentReady && (fullyVisible || (tile.contentsVisibility(frameState.cullingVolume) !== Intersect.OUTSIDE))) {
+        if (tile.contentReady && (fullyVisible || (tile.contentsVisibility(frameState) !== Intersect.OUTSIDE))) {
             tileset._selectedTiles.push(tile);
             tile.selected = true;
 
@@ -1177,7 +1177,6 @@ define([
         }
 
         var maximumScreenSpaceError = tileset._maximumScreenSpaceError;
-        var cullingVolume = frameState.cullingVolume;
 
         tileset._selectedTiles.length = 0;
         tileset._selectedTilesToStyle.length = 0;
@@ -1204,7 +1203,7 @@ define([
             return;
         }
 
-        root.visibilityPlaneMask = root.visibility(cullingVolume, CullingVolume.MASK_INDETERMINATE);
+        root.visibilityPlaneMask = root.visibility(frameState, CullingVolume.MASK_INDETERMINATE);
         if (root.visibilityPlaneMask === CullingVolume.MASK_OUTSIDE) {
             return;
         }
@@ -1290,7 +1289,7 @@ define([
                             if (child.insideViewerRequestVolume(frameState)) {
                                 // Use parent's geometric error with child's box to see if we already meet the SSE
                                 if (getScreenSpaceError(tileset, t.geometricError, child, frameState) > maximumScreenSpaceError) {
-                                    child.visibilityPlaneMask = child.visibility(cullingVolume, visibilityPlaneMask);
+                                    child.visibilityPlaneMask = child.visibility(frameState, visibilityPlaneMask);
                                     if (isVisible(child.visibilityPlaneMask)) {
                                         if (child.contentUnloaded) {
                                             requestContent(tileset, child, outOfCore);
@@ -1339,7 +1338,7 @@ define([
                         selectTile(tileset, t, fullyVisible, frameState);
 
                         if (outOfCore) {
-                            for (k = 0; (k < childrenLength) && t.canRequestContent(); ++k) {
+                            for (k = 0; k < childrenLength; ++k) {
                                 child = children[k];
                                 // PERFORMANCE_IDEA: we could spin a bit less CPU here by keeping separate lists for unloaded/ready children.
                                 if (child.contentUnloaded) {
@@ -1358,7 +1357,7 @@ define([
                         for (k = 0; k < childrenLength; ++k) {
                             child = children[k];
                             if (child.insideViewerRequestVolume(frameState)) {
-                                child.visibilityPlaneMask = child.visibility(frameState.cullingVolume, visibilityPlaneMask);
+                                child.visibilityPlaneMask = child.visibility(frameState, visibilityPlaneMask);
                             } else {
                                 child.visibilityPlaneMask = CullingVolume.MASK_OUTSIDE;
                             }
@@ -1396,7 +1395,7 @@ define([
                         child = children[k];
                         child.updateTransform(t.computedTransform);
                         if (child.insideViewerRequestVolume(frameState)) {
-                            child.visibilityPlaneMask = child.visibility(frameState.cullingVolume, visibilityPlaneMask);
+                            child.visibilityPlaneMask = child.visibility(frameState, visibilityPlaneMask);
                         } else {
                             child.visibilityPlaneMask = CullingVolume.MASK_OUTSIDE;
                         }
@@ -1522,6 +1521,7 @@ define([
                     // RESEARCH_IDEA: ability to unload tiles (without content) for an
                     // external tileset when all the tiles are unloaded.
                     ++tileset._statistics.numberContentReady;
+                    incrementPointAndFeatureLoadCounts(tileset, tile.content);
                     tile.replacementNode = tileset._replacementList.add(tile);
                 }
             } else {
@@ -1552,64 +1552,13 @@ define([
         stats.numberOfAttemptedRequests = 0;
         stats.numberOfTilesStyled = 0;
         stats.numberOfFeaturesStyled = 0;
+        stats.numberOfFeaturesSelected = 0;
+        stats.numberOfPointsSelected = 0;
     }
 
-    function showStats(tileset, isPick) {
+    function updateLastStats(tileset, isPick) {
         var stats = tileset._statistics;
         var last = isPick ? stats.lastPick : stats.lastColor;
-
-        var outputStats = (tileset.debugShowStatistics && !isPick) || (tileset.debugShowPickStatistics && isPick);
-        var showStatsThisFrame =
-            ((tileset._debugShowStatistics !== tileset.debugShowStatistics) ||
-             (tileset._debugShowPickStatistics !== tileset.debugShowPickStatistics));
-        var statsChanged =
-            (last.visited !== stats.visited ||
-             last.numberOfCommands !== stats.numberOfCommands ||
-             last.selected !== tileset._selectedTiles.length ||
-             last.numberOfAttemptedRequests !== stats.numberOfAttemptedRequests ||
-             last.numberOfPendingRequests !== stats.numberOfPendingRequests ||
-             last.numberProcessing !== stats.numberProcessing ||
-             last.numberContentReady !== stats.numberContentReady ||
-             last.numberTotal !== stats.numberTotal ||
-             last.numberOfTilesStyled !== stats.numberOfTilesStyled ||
-             last.numberOfFeaturesStyled !== stats.numberOfFeaturesStyled);
-
-        if (outputStats && (showStatsThisFrame || statsChanged)) {
-            // The shadowed properties are used to ensure that when a show stats properties
-            // is set to true, it outputs the stats on the next frame even if they didn't
-            // change from the previous frame.
-            tileset._debugShowStatistics = tileset.debugShowStatistics;
-            tileset._debugShowPickStatistics = tileset.debugShowPickStatistics;
-
-            // Since the pick pass uses a smaller frustum around the pixel of interest,
-            // the stats will be different than the normal render pass.
-            var s = isPick ? '[Pick ]: ' : '[Color]: ';
-            s +=
-                // --- Rendering stats
-                'Visited: ' + stats.visited +
-                // Number of commands returned is likely to be higher than the number of tiles selected
-                // because of tiles that create multiple commands.
-                ', Selected: ' + tileset._selectedTiles.length +
-                // Number of commands executed is likely to be higher because of commands overlapping
-                // multiple frustums.
-                ', Commands: ' + stats.numberOfCommands +
-
-                // --- Cache/loading stats
-                ' | Requests: ' + stats.numberOfPendingRequests +
-                ', Attempted: ' + stats.numberOfAttemptedRequests +
-                ', Processing: ' + stats.numberProcessing +
-                ', Content Ready: ' + stats.numberContentReady +
-                // Total number of tiles includes tiles without content, so "Ready" may never reach
-                // "Total."  Total also will increase when a tile with a tileset.json content is loaded.
-                ', Total: ' + stats.numberTotal +
-
-                // --- Styling stats
-                ' | Tiles styled: ' + stats.numberOfTilesStyled +
-                ', Features styled: ' + stats.numberOfFeaturesStyled;
-
-            /*global console*/
-            console.log(s);
-        }
 
         last.visited = stats.visited;
         last.numberOfCommands = stats.numberOfCommands;
@@ -1619,8 +1568,46 @@ define([
         last.numberProcessing = stats.numberProcessing;
         last.numberContentReady = stats.numberContentReady;
         last.numberTotal = stats.numberTotal;
+        last.numberOfFeaturesSelected = stats.numberOfFeaturesSelected;
+        last.numberOfFeaturesLoaded = stats.numberOfFeaturesLoaded;
+        last.numberOfPointsSelected = stats.numberOfPointsSelected;
+        last.numberOfPointsLoaded = stats.numberOfPointsLoaded;
         last.numberOfTilesStyled = stats.numberOfTilesStyled;
         last.numberOfFeaturesStyled = stats.numberOfFeaturesStyled;
+    }
+
+    function updatePointAndFeatureCounts(tileset, content, decrement, load) {
+        var stats = tileset._statistics;
+        var contents = content.innerContents;
+        var pointsLength = content.pointsLength;
+        var featuresLength = content.featuresLength;
+
+        if (load) {
+            stats.numberOfFeaturesLoaded += decrement ? -featuresLength : featuresLength;
+            stats.numberOfPointsLoaded += decrement ? -pointsLength : pointsLength;
+        } else {
+            stats.numberOfFeaturesSelected += decrement ? -featuresLength : featuresLength;
+            stats.numberOfPointsSelected += decrement ? -pointsLength : pointsLength;
+        }
+
+        if (defined(contents)) {
+            var length = contents.length;
+            for (var i = 0; i < length; ++i) {
+                updatePointAndFeatureCounts(tileset, contents[i], decrement, load);
+            }
+        }
+    }
+
+    function incrementPointAndFeatureSelectionCounts(tileset, content) {
+        updatePointAndFeatureCounts(tileset, content, false, false);
+    }
+
+    function incrementPointAndFeatureLoadCounts(tileset, content) {
+        updatePointAndFeatureCounts(tileset, content, false, true);
+    }
+
+    function decrementPointAndFeatureLoadCounts(tileset, content) {
+        updatePointAndFeatureCounts(tileset, content, true, true);
     }
 
     function updateTiles(tileset, frameState) {
@@ -1638,6 +1625,7 @@ define([
                 // makes changes that update needs to apply to WebGL resources
                 tileVisible.raiseEvent(tile);
                 tile.update(tileset, frameState);
+                incrementPointAndFeatureSelectionCounts(tileset, tile.content);
             }
         }
 
@@ -1663,6 +1651,7 @@ define([
         while ((node !== sentinel) && ((replacementList.length > maximumNumberOfLoadedTiles) || trimTiles)) {
             var tile = node.item;
 
+            decrementPointAndFeatureLoadCounts(tileset, tile.content);
             tileUnload.raiseEvent(tile);
             tile.unloadContent();
 
@@ -1716,29 +1705,6 @@ define([
 
     ///////////////////////////////////////////////////////////////////////////
 
-    function applyDebugSettings(tileset, frameState) {
-        // Draw a debug camera in freeze frame mode
-        var enterFreezeFrame = tileset.debugFreezeFrame && !tileset._debugFreezeFrame;
-        var exitFreezeFrame = !tileset.debugFreezeFrame && tileset._debugFreezeFrame;
-        tileset._debugFreezeFrame = tileset.debugFreezeFrame;
-        if (tileset.debugFreezeFrame) {
-            if (enterFreezeFrame) {
-                // Recreate debug camera when entering freeze frame mode
-                tileset._debugCameraFrustum = tileset._debugCameraFrustum && tileset._debugCameraFrustum.destroy();
-                tileset._debugCameraFrustum = new DebugCameraPrimitive({
-                    camera : frameState.camera,
-                    updateOnChange : false
-                });
-            }
-            tileset._debugCameraFrustum.update(frameState);
-        } else if (exitFreezeFrame) {
-            // Destroy debug camera when exiting freeze frame
-            tileset._debugCameraFrustum = tileset._debugCameraFrustum && tileset._debugCameraFrustum.destroy();
-        }
-    }
-
-    ///////////////////////////////////////////////////////////////////////////
-
     /**
      * Called when {@link Viewer} or {@link CesiumWidget} render the scene to
      * get the draw commands needed to render this primitive.
@@ -1750,8 +1716,7 @@ define([
      * @exception {DeveloperError} The tileset must be 3D Tiles version 0.0.  See https://github.com/AnalyticalGraphicsInc/3d-tiles#spec-status
      */
     Cesium3DTileset.prototype.update = function(frameState) {
-        // TODO: Support 2D and CV
-        if (!this.show || !this.ready || (frameState.mode !== SceneMode.SCENE3D)) {
+        if (!this.show || !this.ready) {
             return;
         }
 
@@ -1766,8 +1731,6 @@ define([
         var passes = frameState.passes;
         var isPick = (passes.pick && !passes.render);
         var outOfCore = !isPick;
-
-        applyDebugSettings(this, frameState);
 
         clearStats(this);
 
@@ -1791,7 +1754,7 @@ define([
         // model's readyPromise.
         raiseLoadProgressEvent(this, frameState);
 
-        showStats(this, isPick);
+        updateLastStats(this, isPick);
     };
 
     /**
