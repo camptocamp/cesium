@@ -212,7 +212,7 @@ define([
                 that._tileUrlTemplates[i] = joinUrls(baseUri, template).toString().replace('{version}', data.version);
             }
 
-            var availableTiles = data.available;
+            var availableTiles = that._availableTiles = data.available;
 
             if (defined(availableTiles)) {
                 that._availability = new TileAvailability(that._tilingScheme, availableTiles.length);
