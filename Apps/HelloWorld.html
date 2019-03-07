@@ -118,8 +118,8 @@
 
   var sn = new Cesium['Cesium3DTileset']({
       url: 'https://vectortiles0.geo.admin.ch/3d-tiles/ch.swisstopo.swissnames3d.3d/20180716/tileset.json',
-      style: new Cesium['Cesium3DTileStyle'](labelStyleEnhanced),
     });
+  sn.style = new Cesium['Cesium3DTileStyle'](labelStyleEnhanced);
 
   // scene.primitives.add(bdg);
   scene.primitives.add(sn); // FIXME: why the user needs a left click on the map to have the points displayed? why the styling is not applied (only white dots displayed)?
